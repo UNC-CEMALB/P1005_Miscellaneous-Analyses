@@ -1,0 +1,190 @@
+---
+title: "AL scoring_ab_7.14.22"
+output: html_document
+---
+
+```{r}
+#Output = ("~/Documents/BBSP/Dr. Jaspers lab/Research Projects/2021 -2022  Allostatic load Research/3. Data/3. R studio Analysis/Final analysis /revised data")
+cur_date = "071422"
+
+library(readxl)
+library(tidyverse)
+library(reshape2)
+
+
+# reading in file
+allostatic_loading_df = data.frame(read_excel("~/Documents/BBSP/Dr. Jaspers lab/Research Projects/2021 -2022  Allostatic load Research/3. Data/3. R studio Analysis/Final analysis /revised data/Allostatic_Mediator_Data_062422ab.xlsx", sheet = 2)) 
+```
+
+```{r}
+# viewing the dataset initially helps ensure it was read it properly and gives a view of what it looks like
+head(allostatic_loading_df)
+```
+
+```{r}
+# creating all dfs to be analyzed
+nonsmoker_df = allostatic_loading_df %>%
+    # using a pipe (%>%) to filter the group column in the df for non-smokers only
+    filter(Group == "NS")
+smoker_df = allostatic_loading_df %>%
+    filter(Group == "CS")
+
+# splitting the df based on group and race, so to make the code more efficient
+split_allostatic_df = allostatic_loading_df %>%
+    # grouping by group then race
+    group_by(Group, Race) %>%
+    # splitting the df based on those variables
+    group_split()
+
+black_nonsmoker_df = split_allostatic_df[[3]]
+black_smoker_df = split_allostatic_df[[1]]
+white_nonsmoker_df = split_allostatic_df[[4]]
+white_smoker_df = split_allostatic_df[[2]]
+
+# viewing one of the dataframes 
+head(black_nonsmoker_df)
+```
+
+```{r}
+mediator_score = function(df){
+    # always use these next lines to describe the inputs, outputs, and purpose of your function
+    
+    # """
+    # Creating a scoring function for each mediator.
+    # :param (input): initial df (df)
+    # :output: df containing the variable (biomarker) name, subject ID, and score
+    # """
+    
+    # creating an empty df to store values
+    score_df = data.frame()
+    
+    # getting all variable names for loop to iterate through
+    mediators = unique(df$Variable)
+    
+    # your iterator (in this case 'i') can be any letter or word, but typically in computer science i or j are used
+    for (i in 1:length(mediators[1])){
+
+        # filtering df for each mediator
+        filtered_df = df %>%
+            filter(Variable == mediators[i])
+        
+        # now iterating through each value of the filtered_df, since we want to access each value
+        for (j in 1:length(filtered_df$Value)){
+
+            # score = (mediator value - mediator min)/ (mediator max - mediator min)
+            mediator_score_formula = (filtered_df$Value[j] - min(filtered_df$Value))/(max(filtered_df$Value) - min(filtered_df$Value))
+
+            # storing mediator, subject id, and score
+            values_vector = cbind(mediators[i], df$Subject_ID[j], mediator_score_formula)
+            score_df = rbind(score_df, values_vector)
+        }
+    }
+    
+    # renaming columns
+    colnames(score_df) = c("Variable", "Subject_ID", "Mediator_Score")
+    
+    # for some reason the Mediator_Score is a character type, so changing to a numeric
+    score_df$Mediator_Score = as.numeric(as.character(score_df$Mediator_Score))
+    score_df$Variable = as.character(score_df$Variable)
+    score_df$Subject_ID = as.character(score_df$Subject_ID)
+    
+    return(score_df)
+}
+```
+
+
+
+```{r}
+# calling mediator_score function
+NS_mediator_score_df = mediator_score(nonsmoker_df)
+CS_mediator_score_df = mediator_score(smoker_df)
+black_NS_mediator_score_df = mediator_score(black_nonsmoker_df)
+black_CS_mediator_score_df = mediator_score(black_smoker_df)
+white_NS_mediator_score_df = mediator_score(white_nonsmoker_df)
+white_CS_mediator_score_df = mediator_score(white_smoker_df)
+
+# viewing results of one of the dataframes
+head(NS_mediator_score_df)
+```
+
+```{r}
+allostatic_score = function(mediator_score_df, Group, Covariate){
+    # """
+    # Creating a scoring function for allostatic load.
+    # :param (input): mediator score df (mediator_score_df), smoking group of subjects, race of subjects
+    # :output: df containing the group, covariate (race) either black or white, and allostatic score
+    # """
+    
+    # creating a vector for variables that increase atherosclerotic risk
+    allostatic_load_biomarkers = c('Cortisol','Noradrenaline','Hba1c','Fibrinogen','CRP')
+    
+    # filtering df for these allostatic load biomarkers
+    load_df = mediator_score_df %>%
+        filter(Variable %in% allostatic_load_biomarkers) 
+
+    # filtering for HDL
+    HDL_df = mediator_score_df %>%
+        filter(Variable == "HDL") %>%
+        select(-Variable)
+
+    
+    # summing the mediator scores for biomarkers that increase atherosclerotic risk
+    biomarker_load_df = load_df %>%
+        group_by(Subject_ID) %>%
+        summarize(Mediator_Score_Sum = sum(Mediator_Score))
+    
+    # allostatic score = sum of scores of all load biomarkers for a subject - individual subject HDL score
+    # storing this value in the df as another col
+    allostatic_load_df = data.frame(Subject_ID = biomarker_load_df$Subject_ID, 
+                                    Allostatic_Score = biomarker_load_df$Mediator_Score_Sum - HDL_df$Mediator_Score)
+
+    # putting these values into a     vector and adding to the df
+    score_df = cbind(Group, Covariate, allostatic_load_df)
+    
+    return(score_df)
+}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+# calling allostatic_score function
+# these first two lines of code have "NA" values for race, since we weren't looking at race as a covariate until 
+# the dfs were stratified later by race
+NS_allostatic_score_df = allostatic_score(NS_mediator_score_df, "NS", NA)
+CS_allostatic_score_df = allostatic_score(CS_mediator_score_df, "CS", NA)
+black_NS_allostatic_score_df = allostatic_score(black_NS_mediator_score_df, "NS", "B")
+black_CS_allostatic_score_df = allostatic_score(black_CS_mediator_score_df, "CS", "B")
+white_NS_allostatic_score_df = allostatic_score(white_NS_mediator_score_df, "NS", "W")
+white_CS_allostatic_score_df = allostatic_score(white_CS_mediator_score_df, "CS", "W")
+
+# viewing one of the outputs
+head(NS_allostatic_score_df)
+```
+
+```{r}
+# creating 1 df for the allostatic scores
+# using the rbind function to combine by rows
+allostatic_score_df = rbind(NS_allostatic_score_df, CS_allostatic_score_df, black_NS_allostatic_score_df, 
+                            black_CS_allostatic_score_df, white_NS_allostatic_score_df, 
+                            white_CS_allostatic_score_df) %>%
+    # sorting the df from highest to lowest for easier viewing
+    arrange(-Allostatic_Score)
+
+head(allostatic_score_df)
+```
+
+```{r}
+# just because I'm interested I wanted to see how these groups were distributed so I made this visualization
+options(repr.plot.width=10, repr.plot.height=7) #changing size
+ggplot(data = allostatic_score_df, aes(x = Covariate, y = Allostatic_Score, color = Group)) +
+  #stat_boxplot(geom = "errorbar", width = 0.2) + # changes width of whiskers
+  geom_boxplot(aes(fill = Group), alpha = 0.7) #+ 
+  #geom_point(position = position_jitter(w = 0.1)) #+ 
+  #facet_wrap(~Group)
+```
+
